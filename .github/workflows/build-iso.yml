@@ -1,0 +1,58 @@
+name: Build YoRHa i3 ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      fedora_version:
+        description: "Fedora release to build"
+        default: "43"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack the kit
+        run: |
+          tar xzf yorha-i3.tar.gz
+          # Optional: your own wallpaper, uploaded to the repo as wallpaper.png
+          if [ -f wallpaper.png ]; then cp wallpaper.png yorha-i3/assets/wallpaper.png; fi
+          chmod +x yorha-i3/build-iso.sh
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo mkdir -p /mnt/live-tmp
+          df -h / /mnt
+
+      - name: Build the ISO inside a Fedora container
+        run: |
+          VER="${{ inputs.fedora_version }}"
+          VER="${VER:-43}"
+          docker run --rm --privileged \
+            -v "$PWD":/work -v /mnt/live-tmp:/live-tmp \
+            -e FEDORA_VER="$VER" -e ALLOW_ROOT=1 \
+            -e YORHA_SELINUX_PERMISSIVE=1 \
+            -e LIVE_TMP=/live-tmp -e WORK=/work/out \
+            "fedora:$VER" \
+            bash -c 'set -o pipefail; cd /work/yorha-i3 && ./build-iso.sh 2>&1 | tee /work/build.log'
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: YoRHa-i3-iso
+          path: out/fedora-kickstarts/*.iso
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
